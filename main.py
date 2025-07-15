@@ -7,9 +7,11 @@ Core Features:
 - Image upload and ingredient detection using Faster R-CNN
 - Recipe generation with Hugging Face text-generation
 - Flavor profile visualization with Matplotlib
+- Freemium monetization with Stripe integration
+- Affiliate marketing for ingredients
 
 Author: StickChef AI Team
-Version: 1.0
+Version: 1.1 (Monetization Ready)
 """
 
 import sys
@@ -45,6 +47,21 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer, pipeline
 # Visualization
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+
+# Monetization
+try:
+    from monetization import (
+        UserSubscriptionManager, 
+        AffiliateManager,
+        render_upgrade_prompt,
+        render_usage_dashboard,
+        add_affiliate_links,
+        render_affiliate_section
+    )
+    MONETIZATION_ENABLED = True
+except ImportError:
+    MONETIZATION_ENABLED = False
+    logging.warning("Monetization module not found. Running in free mode only.")
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1001,6 +1018,11 @@ def run_streamlit_app():
     if 'manual_ingredients' not in st.session_state:
         st.session_state.manual_ingredients = ""
     
+    # Monetization: Add usage dashboard to sidebar
+    if MONETIZATION_ENABLED:
+        user_email = "demo@stickchef.ai"  # In production, get from authentication
+        render_usage_dashboard(user_email)
+    
     # Step 1: Image Upload
     st.header("📸 Step 1: Upload Fridge/Pantry Image")
     uploaded_file = st.file_uploader(
@@ -1110,60 +1132,109 @@ def run_streamlit_app():
     st.header("🍳 Step 4: Generate Recipes")
     
     if current_ingredients:
-        if st.button("🚀 Generate 3 Recipe Options", type="primary"):
-            with st.spinner("Generating personalized recipes..."):
-                try:
-                    # Prepare data for API
-                    data = {
-                        'ingredients': current_ingredients,
-                        'preferences': preferences
-                    }
-                    
-                    # Call Flask API
-                    response = requests.post('http://localhost:5000/generate_multiple_recipes', json=data)
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.session_state.recipes = result.get('recipes', [])
+        # Monetization: Check usage limits
+        can_generate = True
+        if MONETIZATION_ENABLED:
+            subscription_manager = UserSubscriptionManager()
+            user_email = "demo@stickchef.ai"  # In production, get from authentication
+            
+            if not subscription_manager.can_generate_recipe(user_email):
+                can_generate = False
+                st.error("⚠️ You've reached your daily recipe limit!")
+                render_upgrade_prompt(subscription_manager.get_user_plan(user_email), "recipes")
+        
+        if can_generate:
+            # Add wild card fusion option
+            use_wild_card = st.checkbox("🎲 Use Wild Card Fusion", help="Generate unexpected cultural fusion combinations!")
+            
+            if use_wild_card and MONETIZATION_ENABLED:
+                subscription_manager = UserSubscriptionManager()
+                user_email = "demo@stickchef.ai"
+                
+                if not subscription_manager.can_use_wild_card(user_email):
+                    st.error("⚠️ You've reached your daily wild card limit!")
+                    render_upgrade_prompt(subscription_manager.get_user_plan(user_email), "wild card fusions")
+                    use_wild_card = False
+            
+            if st.button("🚀 Generate 3 Recipe Options", type="primary"):
+                with st.spinner("Generating personalized recipes..."):
+                    try:
+                        # Update preferences for wild card
+                        final_preferences = preferences
+                        if use_wild_card:
+                            final_preferences += ", Wild Card Fusion: True"
                         
-                        st.success(f"✅ {result.get('message', 'Recipes generated successfully!')}")
+                        # Prepare data for API
+                        data = {
+                            'ingredients': current_ingredients,
+                            'preferences': final_preferences
+                        }
                         
-                        # Display recipes
-                        if st.session_state.recipes:
-                            st.header("🍽️ Your Recipe Options")
+                        # Call Flask API
+                        response = requests.post('http://localhost:5000/generate_multiple_recipes', json=data)
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            st.session_state.recipes = result.get('recipes', [])
                             
-                            for i, recipe in enumerate(st.session_state.recipes):
-                                display_recipe_card(recipe, i)
+                            # Monetization: Update usage after successful generation
+                            if MONETIZATION_ENABLED:
+                                subscription_manager = UserSubscriptionManager()
+                                user_email = "demo@stickchef.ai"
+                                recipe_type = "wild_card" if use_wild_card else "regular"
+                                subscription_manager.increment_usage(user_email, recipe_type)
                             
-                            # Add download option
-                            st.subheader("📥 Export Recipes")
-                            if st.button("Download All Recipes"):
-                                # Create downloadable content
-                                content = f"StickChef AI Recipes\n{'='*50}\n\n"
-                                content += f"Ingredients Used: {', '.join(current_ingredients)}\n"
-                                content += f"Preferences: {preferences}\n\n"
+                            st.success(f"✅ {result.get('message', 'Recipes generated successfully!')}")
+                            
+                            # Display recipes
+                            if st.session_state.recipes:
+                                st.header("🍽️ Your Recipe Options")
                                 
                                 for i, recipe in enumerate(st.session_state.recipes):
-                                    content += f"Recipe {i+1}: {recipe['title']}\n"
-                                    content += f"{'='*30}\n"
-                                    content += "Instructions:\n"
-                                    for j, step in enumerate(recipe['steps'], 1):
-                                        content += f"{j}. {step}\n"
-                                    content += f"\nNutrition: {recipe['nutrition']}\n"
-                                    content += f"Flavor Profile: {recipe['flavor_profile']}\n\n"
+                                    # Add affiliate links to recipes
+                                    if MONETIZATION_ENABLED:
+                                        recipe = add_affiliate_links(recipe, current_ingredients)
+                                    
+                                    display_recipe_card(recipe, i)
+                                    
+                                    # Add affiliate section after each recipe
+                                    if MONETIZATION_ENABLED:
+                                        render_affiliate_section(recipe)
                                 
-                                st.download_button(
-                                    label="📄 Download as Text File",
-                                    data=content,
-                                    file_name="stickchef_recipes.txt",
-                                    mime="text/plain"
-                                )
-                    else:
-                        st.error(f"❌ Error: {response.json().get('error', 'Unknown error')}")
-                
-                except Exception as e:
-                    st.error(f"❌ Connection error: {str(e)}")
-                    st.info("💡 Make sure the Flask server is running!")
+                                # Add download option
+                                st.subheader("📥 Export Recipes")
+                                if st.button("Download All Recipes"):
+                                    # Create downloadable content
+                                    content = f"StickChef AI Recipes\n{'='*50}\n\n"
+                                    content += f"Ingredients Used: {', '.join(current_ingredients)}\n"
+                                    content += f"Preferences: {final_preferences}\n\n"
+                                    
+                                    for i, recipe in enumerate(st.session_state.recipes):
+                                        content += f"Recipe {i+1}: {recipe['title']}\n"
+                                        content += f"{'='*30}\n"
+                                        content += "Instructions:\n"
+                                        for j, step in enumerate(recipe['steps'], 1):
+                                            content += f"{j}. {step}\n"
+                                        content += f"\nNutrition: {recipe['nutrition']}\n"
+                                        content += f"Flavor Profile: {recipe['flavor_profile']}\n"
+                                        
+                                        # Add sustainability info if available
+                                        if 'sustainability' in recipe:
+                                            content += f"Sustainability Score: {recipe['sustainability']}\n"
+                                        content += "\n"
+                                    
+                                    st.download_button(
+                                        label="📄 Download as Text File",
+                                        data=content,
+                                        file_name="stickchef_recipes.txt",
+                                        mime="text/plain"
+                                    )
+                        else:
+                            st.error(f"❌ Error: {response.json().get('error', 'Unknown error')}")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Connection error: {str(e)}")
+                        st.info("💡 Make sure the Flask server is running!")
     else:
         st.info("👆 Please add some ingredients first!")
     
@@ -1171,7 +1242,40 @@ def run_streamlit_app():
     if st.session_state.recipes and not st.button("🚀 Generate 3 Recipe Options", type="primary"):
         st.header("🍽️ Your Recipe Options")
         for i, recipe in enumerate(st.session_state.recipes):
+            # Add affiliate links to recipes
+            if MONETIZATION_ENABLED:
+                recipe = add_affiliate_links(recipe, current_ingredients)
+            
             display_recipe_card(recipe, i)
+            
+            # Add affiliate section after each recipe
+            if MONETIZATION_ENABLED:
+                render_affiliate_section(recipe)
+    
+    # Monetization: T-shirt promotion
+    if MONETIZATION_ENABLED:
+        st.markdown("---")
+        st.header("👕 Get the StickChef Style!")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("""
+            **🎨 StickChef AI T-Shirt** - Show off your fusion cooking skills!
+            
+            Features:
+            • Custom flavor profile design
+            • "Wild Card Fusion" branding  
+            • Sustainability messaging
+            • Premium cotton blend
+            
+            **Special Launch Price: $25** (Limited time!)
+            """)
+        
+        with col2:
+            if st.button("🛒 Shop Now", type="secondary"):
+                st.write("🚀 Coming Soon! Pre-order available at launch.")
+                st.info("Sign up for notifications when the merch store goes live!")
     
     # Footer
     st.markdown("---")
