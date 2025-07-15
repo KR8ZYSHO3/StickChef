@@ -1,17 +1,17 @@
 flask>=2.3.0
 flask-cors>=4.0.0
 streamlit>=1.20.0
-torch>=2.2.0
-torchvision>=0.17.0
-transformers>=4.30.0
 pillow>=10.0.0
-numpy>=1.26.0
+numpy>=1.24.0
 matplotlib>=3.7.0
 requests>=2.31.0
-# speechrecognition>=3.10.0  # Commented out for deployment - requires system audio libs
-# pyaudio>=0.2.11  # Commented out for deployment - requires portaudio system lib
 gunicorn>=21.0.0
 python-dotenv>=1.0.0
 stripe>=6.0.0
-streamlit-authenticator>=0.2.3
-colorama>=0.4.6 
+colorama>=0.4.6
+
+# Heavy ML packages removed for deployment
+# torch>=2.2.0
+# torchvision>=0.17.0
+# transformers>=4.30.0
+# streamlit-authenticator>=0.2.3 
